@@ -1,0 +1,176 @@
+services:
+  carrier_a_db:
+    image: postgres:16-alpine
+    container_name: simulator_carrier_a_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes: [carrier_a_pg_data:/var/lib/postgresql/data]
+    networks: [carrier_a_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  carrier_a:
+    build: {context: ./services/carrier_a, args: {PORT: 8000}}
+    container_name: simulator_carrier_a
+    environment:
+      PORT: "8000"
+      RATE_LIMIT_PER_MINUTE: ${CARRIER_A_RATE_LIMIT:-60}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@carrier_a_db:5432/${POSTGRES_DB}
+    ports: ["8001:8000"]
+    networks: [carrier_a_net]
+    depends_on: {carrier_a_db: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  carrier_b_db:
+    image: mysql:8.4
+    container_name: simulator_carrier_b_db
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    volumes: [carrier_b_mysql_data:/var/lib/mysql]
+    networks: [carrier_b_net]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  carrier_b:
+    build: {context: ./services/carrier_b, args: {PORT: 8000}}
+    container_name: simulator_carrier_b
+    environment:
+      PORT: "8000"
+      RATE_LIMIT_PER_MINUTE: ${CARRIER_B_RATE_LIMIT:-60}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@carrier_b_db:3306/${MYSQL_DATABASE}
+    ports: ["8002:8000"]
+    networks: [carrier_b_net]
+    depends_on: {carrier_b_db: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  carrier_c_db:
+    image: mongo:8.0
+    container_name: simulator_carrier_c_db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in .env}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:?Set MONGO_DATABASE in .env}
+    volumes: [carrier_c_mongo_data:/data/db]
+    networks: [carrier_c_net]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  carrier_c:
+    build: {context: ./services/carrier_c, args: {PORT: 8000}}
+    container_name: simulator_carrier_c
+    environment:
+      PORT: "8000"
+      RATE_LIMIT_PER_MINUTE: ${CARRIER_C_RATE_LIMIT:-60}
+      MONGODB_URL: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@carrier_c_db:27017/${MONGO_DATABASE}?authSource=admin
+      MONGODB_DATABASE: ${MONGO_DATABASE}
+    ports: ["8003:8000"]
+    networks: [carrier_c_net]
+    depends_on: {carrier_c_db: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  carrier_d:
+    build: {context: ./services/carrier_d, args: {PORT: 8000}}
+    container_name: simulator_carrier_d
+    environment:
+      PORT: "8000"
+      RATE_LIMIT_PER_MINUTE: ${CARRIER_D_RATE_LIMIT:-60}
+      DATABASE_URL: sqlite:////data/carrier_d.sqlite3
+      DATABASE_PATH: /data/carrier_d.sqlite3
+    ports: ["8004:8000"]
+    volumes: [carrier_d_sqlite_data:/data]
+    networks: [carrier_d_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  seed:
+    build: {context: ., dockerfile: tools/Dockerfile}
+    command: ["python", "-m", "tools.seed_all"]
+    environment:
+      SEED: ${SEED:-42}
+      SEED_EVENTS_PER_CARRIER: ${SEED_EVENTS_PER_CARRIER:-50000}
+      DIRTY_RATE: ${DIRTY_RATE:-0.10}
+      CARRIER_A_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@carrier_a_db:5432/${POSTGRES_DB}
+      CARRIER_B_DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@carrier_b_db:3306/${MYSQL_DATABASE}
+      MONGODB_URL: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@carrier_c_db:27017/${MONGO_DATABASE}?authSource=admin
+      MONGODB_DATABASE: ${MONGO_DATABASE}
+      CARRIER_D_DATABASE_URL: sqlite:////data/carrier_d.sqlite3
+    volumes: [carrier_d_sqlite_data:/data]
+    networks: [carrier_a_net, carrier_b_net, carrier_c_net, carrier_d_net]
+    depends_on:
+      carrier_a: {condition: service_healthy}
+      carrier_b: {condition: service_healthy}
+      carrier_c: {condition: service_healthy}
+      carrier_d: {condition: service_healthy}
+    restart: "no"
+
+  generator:
+    build: {context: ., dockerfile: tools/Dockerfile}
+    command: ["python", "-m", "tools.generator"]
+    environment:
+      SEED: ${SEED:-42}
+      SEED_EVENTS_PER_CARRIER: ${SEED_EVENTS_PER_CARRIER:-50000}
+      EVENTS_PER_CARRIER_PER_CYCLE: ${EVENTS_PER_CARRIER_PER_CYCLE:-10000}
+      GENERATOR_INTERVAL_SECONDS: ${GENERATOR_INTERVAL_SECONDS:-1800}
+      DIRTY_RATE: ${DIRTY_RATE:-0.10}
+      CARRIER_A_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@carrier_a_db:5432/${POSTGRES_DB}
+      CARRIER_B_DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@carrier_b_db:3306/${MYSQL_DATABASE}
+      MONGODB_URL: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@carrier_c_db:27017/${MONGO_DATABASE}?authSource=admin
+      MONGODB_DATABASE: ${MONGO_DATABASE}
+      CARRIER_D_DATABASE_URL: sqlite:////data/carrier_d.sqlite3
+    volumes: [carrier_d_sqlite_data:/data]
+    networks: [carrier_a_net, carrier_b_net, carrier_c_net, carrier_d_net]
+    depends_on:
+      seed: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+volumes:
+  carrier_a_pg_data:
+  carrier_b_mysql_data:
+  carrier_c_mongo_data:
+  carrier_d_sqlite_data:
+
+networks:
+  carrier_a_net:
+  carrier_b_net:
+  carrier_c_net:
+  carrier_d_net:

@@ -130,29 +130,47 @@ jobs:
           DB_URL_B="mysql+pymysql://$MY_USER:$MY_PASS@carrier_b_db:3306/$MY_DB"
           DB_URL_C="mongodb://$MO_USER:$MO_PASS@carrier_c_db:27017/$MO_DB?authSource=admin"
 
-          jq \
-            --arg role "$ROLE_ARN" \
-            --arg gw "$ECR_REGISTRY/carrier-b-gateway:$IMAGE_TAG" \
-            --arg ca "$ECR_REGISTRY/carrier-b-carrier-a:$IMAGE_TAG" \
-            --arg cb "$ECR_REGISTRY/carrier-b-carrier-b:$IMAGE_TAG" \
-            --arg cc "$ECR_REGISTRY/carrier-b-carrier-c:$IMAGE_TAG" \
-            --arg cd "$ECR_REGISTRY/carrier-b-carrier-d:$IMAGE_TAG" \
-            --arg db_a "$DB_URL_A" \
-            --arg db_b "$DB_URL_B" \
-            --arg db_c "$DB_URL_C" \
-            --arg modb "$MO_DB" \
-            '
-            .executionRoleArn = $role |
-            (.containerDefinitions[] | select(.name == "gateway")).image = $gw |
-            (.containerDefinitions[] | select(.name == "carrier-a")).image = $ca |
-            (.containerDefinitions[] | select(.name == "carrier-b")).image = $cb |
-            (.containerDefinitions[] | select(.name == "carrier-c")).image = $cc |
-            (.containerDefinitions[] | select(.name == "carrier-d")).image = $cd |
-            ((.containerDefinitions[] | select(.name == "carrier-a")).environment[] | select(.name == "DATABASE_URL")).value = $db_a |
-            ((.containerDefinitions[] | select(.name == "carrier-b")).environment[] | select(.name == "DATABASE_URL")).value = $db_b |
-            ((.containerDefinitions[] | select(.name == "carrier-c")).environment[] | select(.name == "MONGODB_URL")).value = $db_c |
-            ((.containerDefinitions[] | select(.name == "carrier-c")).environment[] | select(.name == "MONGODB_DATABASE")).value = $modb
-            ' task-definition.json > task-definition-rendered.json
+          export DB_URL_A DB_URL_B DB_URL_C
+
+          python3 -c '
+          import json, os
+
+          with open("task-definition.json") as f:
+              td = json.load(f)
+
+          td["executionRoleArn"] = os.environ["ROLE_ARN"]
+          reg = os.environ["ECR_REGISTRY"]
+          tag = os.environ["IMAGE_TAG"]
+
+          for c in td["containerDefinitions"]:
+              name = c["name"]
+              if name == "gateway":
+                  c["image"] = f"{reg}/carrier-b-gateway:{tag}"
+              elif name == "carrier-a":
+                  c["image"] = f"{reg}/carrier-b-carrier-a:{tag}"
+                  for env in c.get("environment", []):
+                      if env["name"] == "DATABASE_URL":
+                          env["value"] = os.environ["DB_URL_A"]
+              elif name == "carrier-b":
+                  c["image"] = f"{reg}/carrier-b-carrier-b:{tag}"
+                  for env in c.get("environment", []):
+                      if env["name"] == "DATABASE_URL":
+                          env["value"] = os.environ["DB_URL_B"]
+              elif name == "carrier-c":
+                  c["image"] = f"{reg}/carrier-b-carrier-c:{tag}"
+                  for env in c.get("environment", []):
+                      if env["name"] == "MONGODB_URL":
+                          env["value"] = os.environ["DB_URL_C"]
+                      elif env["name"] == "MONGODB_DATABASE":
+                          env["value"] = os.environ["MO_DB"]
+              elif name == "carrier-d":
+                  c["image"] = f"{reg}/carrier-b-carrier-d:{tag}"
+
+          with open("task-definition-rendered.json", "w") as f:
+              json.dump(td, f, indent=2)
+
+          print("Successfully rendered task-definition-rendered.json")
+          '
 
       - name: Register Task Definition in AWS ECS
         id: register-task-def

@@ -25,15 +25,15 @@
       "essential": true,
       "portMappings": [
         {
-          "containerPort": 8000,
-          "hostPort": 8000,
+          "containerPort": 8001,
+          "hostPort": 8001,
           "protocol": "tcp"
         }
       ],
       "environment": [
         {
           "name": "PORT",
-          "value": "8000"
+          "value": "8001"
         },
         {
           "name": "RATE_LIMIT_PER_MINUTE",
@@ -51,15 +51,15 @@
       "essential": true,
       "portMappings": [
         {
-          "containerPort": 8000,
-          "hostPort": 8000,
+          "containerPort": 8002,
+          "hostPort": 8002,
           "protocol": "tcp"
         }
       ],
       "environment": [
         {
           "name": "PORT",
-          "value": "8000"
+          "value": "8002"
         },
         {
           "name": "RATE_LIMIT_PER_MINUTE",
@@ -77,15 +77,15 @@
       "essential": true,
       "portMappings": [
         {
-          "containerPort": 8000,
-          "hostPort": 8000,
+          "containerPort": 8003,
+          "hostPort": 8003,
           "protocol": "tcp"
         }
       ],
       "environment": [
         {
           "name": "PORT",
-          "value": "8000"
+          "value": "8003"
         },
         {
           "name": "RATE_LIMIT_PER_MINUTE",
@@ -107,15 +107,15 @@
       "essential": true,
       "portMappings": [
         {
-          "containerPort": 8000,
-          "hostPort": 8000,
+          "containerPort": 8004,
+          "hostPort": 8004,
           "protocol": "tcp"
         }
       ],
       "environment": [
         {
           "name": "PORT",
-          "value": "8000"
+          "value": "8004"
         },
         {
           "name": "RATE_LIMIT_PER_MINUTE",

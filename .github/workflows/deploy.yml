@@ -116,7 +116,20 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
           ROLE_ARN: ${{ steps.ensure-role.outputs.execution_role_arn }}
+          PG_DB: ${{ secrets.POSTGRES_DB || 'carrier_a_db' }}
+          PG_USER: ${{ secrets.POSTGRES_USER || 'carrier_a_user' }}
+          PG_PASS: ${{ secrets.POSTGRES_PASSWORD || '0000' }}
+          MY_DB: ${{ secrets.MYSQL_DATABASE || 'carrier_b_db' }}
+          MY_USER: ${{ secrets.MYSQL_USER || 'carrier_b_user' }}
+          MY_PASS: ${{ secrets.MYSQL_PASSWORD || '0000' }}
+          MO_USER: ${{ secrets.MONGO_ROOT_USERNAME || 'carrier_c_admin' }}
+          MO_PASS: ${{ secrets.MONGO_ROOT_PASSWORD || '0000' }}
+          MO_DB: ${{ secrets.MONGO_DATABASE || 'carrier_c_db' }}
         run: |
+          DB_URL_A="postgresql+psycopg://$PG_USER:$PG_PASS@carrier_a_db:5432/$PG_DB"
+          DB_URL_B="mysql+pymysql://$MY_USER:$MY_PASS@carrier_b_db:3306/$MY_DB"
+          DB_URL_C="mongodb://$MO_USER:$MO_PASS@carrier_c_db:27017/$MO_DB?authSource=admin"
+
           jq \
             --arg role "$ROLE_ARN" \
             --arg gw "$ECR_REGISTRY/carrier-b-gateway:$IMAGE_TAG" \
@@ -124,13 +137,21 @@ jobs:
             --arg cb "$ECR_REGISTRY/carrier-b-carrier-b:$IMAGE_TAG" \
             --arg cc "$ECR_REGISTRY/carrier-b-carrier-c:$IMAGE_TAG" \
             --arg cd "$ECR_REGISTRY/carrier-b-carrier-d:$IMAGE_TAG" \
+            --arg db_a "$DB_URL_A" \
+            --arg db_b "$DB_URL_B" \
+            --arg db_c "$DB_URL_C" \
+            --arg modb "$MO_DB" \
             '
             .executionRoleArn = $role |
             (.containerDefinitions[] | select(.name == "gateway")).image = $gw |
             (.containerDefinitions[] | select(.name == "carrier-a")).image = $ca |
             (.containerDefinitions[] | select(.name == "carrier-b")).image = $cb |
             (.containerDefinitions[] | select(.name == "carrier-c")).image = $cc |
-            (.containerDefinitions[] | select(.name == "carrier-d")).image = $cd
+            (.containerDefinitions[] | select(.name == "carrier-d")).image = $cd |
+            ((.containerDefinitions[] | select(.name == "carrier-a")).environment[] | select(.name == "DATABASE_URL")).value = $db_a |
+            ((.containerDefinitions[] | select(.name == "carrier-b")).environment[] | select(.name == "DATABASE_URL")).value = $db_b |
+            ((.containerDefinitions[] | select(.name == "carrier-c")).environment[] | select(.name == "MONGODB_URL")).value = $db_c |
+            ((.containerDefinitions[] | select(.name == "carrier-c")).environment[] | select(.name == "MONGODB_DATABASE")).value = $modb
             ' task-definition.json > task-definition-rendered.json
 
       - name: Register Task Definition in AWS ECS

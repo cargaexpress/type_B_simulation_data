@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---------- Stage 1: builder ----------
-FROM python:3.12-slim AS builder
+FROM python:3.12-alpine AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /usr/local/bin/uv
 
@@ -17,13 +17,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install -r requirements.txt
 
 # ---------- Stage 2: runtime ----------
-FROM python:3.12-slim AS runtime
+FROM python:3.12-alpine AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
-RUN useradd --create-home --uid 1000 appuser \
+RUN adduser -D -u 1000 appuser \
     && mkdir -p /data \
     && chown -R appuser:appuser /data
 

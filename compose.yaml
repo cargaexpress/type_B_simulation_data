@@ -69,7 +69,7 @@ services:
     restart: unless-stopped
 
   carrier_c_db:
-    image: mongo:8.0
+    image: mongo:7.0
     container_name: simulator_carrier_c_db
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in .env}

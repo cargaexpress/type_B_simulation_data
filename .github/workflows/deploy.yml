@@ -1,0 +1,168 @@
+name: Build and Deploy Type B Simulator to AWS ECR and ECS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build & Push to AWS ECR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Ensure ECR Repositories Exist
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          REPOS=("carrier-b-gateway" "carrier-b-carrier-a" "carrier-b-carrier-b" "carrier-b-carrier-c" "carrier-b-carrier-d" "carrier-b-generator")
+          for repo in "${REPOS[@]}"; do
+            echo "Checking ECR repository: $repo"
+            if ! aws ecr describe-repositories --repository-names "$repo" >/dev/null 2>&1; then
+              echo "Repository $repo not found. Creating..."
+              aws ecr create-repository --repository-name "$repo"
+            else
+              echo "Repository $repo exists."
+            fi
+          done
+
+      - name: Build and Push Docker Images to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "Building and pushing gateway..."
+          docker build -t "$ECR_REGISTRY/carrier-b-gateway:$IMAGE_TAG" -t "$ECR_REGISTRY/carrier-b-gateway:latest" gateway/
+          docker push "$ECR_REGISTRY/carrier-b-gateway:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/carrier-b-gateway:latest"
+
+          echo "Building and pushing carrier_a..."
+          docker build -t "$ECR_REGISTRY/carrier-b-carrier-a:$IMAGE_TAG" -t "$ECR_REGISTRY/carrier-b-carrier-a:latest" services/carrier_a/
+          docker push "$ECR_REGISTRY/carrier-b-carrier-a:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/carrier-b-carrier-a:latest"
+
+          echo "Building and pushing carrier_b..."
+          docker build -t "$ECR_REGISTRY/carrier-b-carrier-b:$IMAGE_TAG" -t "$ECR_REGISTRY/carrier-b-carrier-b:latest" services/carrier_b/
+          docker push "$ECR_REGISTRY/carrier-b-carrier-b:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/carrier-b-carrier-b:latest"
+
+          echo "Building and pushing carrier_c..."
+          docker build -t "$ECR_REGISTRY/carrier-b-carrier-c:$IMAGE_TAG" -t "$ECR_REGISTRY/carrier-b-carrier-c:latest" services/carrier_c/
+          docker push "$ECR_REGISTRY/carrier-b-carrier-c:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/carrier-b-carrier-c:latest"
+
+          echo "Building and pushing carrier_d..."
+          docker build -t "$ECR_REGISTRY/carrier-b-carrier-d:$IMAGE_TAG" -t "$ECR_REGISTRY/carrier-b-carrier-d:latest" services/carrier_d/
+          docker push "$ECR_REGISTRY/carrier-b-carrier-d:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/carrier-b-carrier-d:latest"
+
+          echo "Building and pushing generator tools..."
+          docker build -t "$ECR_REGISTRY/carrier-b-generator:$IMAGE_TAG" -t "$ECR_REGISTRY/carrier-b-generator:latest" -f tools/Dockerfile .
+          docker push "$ECR_REGISTRY/carrier-b-generator:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/carrier-b-generator:latest"
+
+      - name: Ensure ECS Task Execution Role Exists
+        id: ensure-role
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ROLE_NAME="ecsTaskExecutionRole"
+          ROLE_ARN="arn:aws:iam::$ACCOUNT_ID:role/$ROLE_NAME"
+
+          echo "Checking IAM role: $ROLE_NAME"
+          if ! aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+            echo "Role $ROLE_NAME not found. Creating..."
+            aws iam create-role \
+              --role-name "$ROLE_NAME" \
+              --assume-role-policy-document '{
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Principal": {
+                      "Service": "ecs-tasks.amazonaws.com"
+                    },
+                    "Action": "sts:AssumeRole"
+                  }
+                ]
+              }' || true
+
+            aws iam attach-role-policy \
+              --role-name "$ROLE_NAME" \
+              --policy-arn "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy" || true
+          fi
+          echo "execution_role_arn=$ROLE_ARN" >> $GITHUB_OUTPUT
+
+      - name: Render Task Definition
+        id: render-task-def
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+          ROLE_ARN: ${{ steps.ensure-role.outputs.execution_role_arn }}
+        run: |
+          jq \
+            --arg role "$ROLE_ARN" \
+            --arg gw "$ECR_REGISTRY/carrier-b-gateway:$IMAGE_TAG" \
+            --arg ca "$ECR_REGISTRY/carrier-b-carrier-a:$IMAGE_TAG" \
+            --arg cb "$ECR_REGISTRY/carrier-b-carrier-b:$IMAGE_TAG" \
+            --arg cc "$ECR_REGISTRY/carrier-b-carrier-c:$IMAGE_TAG" \
+            --arg cd "$ECR_REGISTRY/carrier-b-carrier-d:$IMAGE_TAG" \
+            '
+            .executionRoleArn = $role |
+            (.containerDefinitions[] | select(.name == "gateway")).image = $gw |
+            (.containerDefinitions[] | select(.name == "carrier-a")).image = $ca |
+            (.containerDefinitions[] | select(.name == "carrier-b")).image = $cb |
+            (.containerDefinitions[] | select(.name == "carrier-c")).image = $cc |
+            (.containerDefinitions[] | select(.name == "carrier-d")).image = $cd
+            ' task-definition.json > task-definition-rendered.json
+
+      - name: Register Task Definition in AWS ECS
+        id: register-task-def
+        run: |
+          REGISTERED_TASK=$(aws ecs register-task-definition \
+            --cli-input-json file://task-definition-rendered.json)
+
+          TASK_DEF_ARN=$(echo "$REGISTERED_TASK" | jq -r '.taskDefinition.taskDefinitionArn')
+          echo "Registered new Task Definition ARN: $TASK_DEF_ARN"
+          echo "task_def_arn=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+
+      - name: Update ECS Service (If Service Exists)
+        env:
+          CLUSTER_NAME: ${{ secrets.ECS_CLUSTER }}
+          SERVICE_NAME: carrier-type-b-simulator-service
+          TASK_DEF_ARN: ${{ steps.register-task-def.outputs.task_def_arn }}
+        run: |
+          SERVICE_EXISTS=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SERVICE_NAME" \
+            --query "services[?status=='ACTIVE'].serviceName" \
+            --output text)
+
+          if [ -n "$SERVICE_EXISTS" ]; then
+            echo "Service $SERVICE_NAME exists. Updating..."
+            aws ecs update-service \
+              --cluster "$CLUSTER_NAME" \
+              --service "$SERVICE_NAME" \
+              --task-definition "$TASK_DEF_ARN" \
+              --force-new-deployment
+          else
+            echo "Notice: Service $SERVICE_NAME is not actively running in $CLUSTER_NAME."
+            echo "Task definition $TASK_DEF_ARN is ready in AWS for on-demand execution."
+          fi

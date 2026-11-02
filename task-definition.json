@@ -1,0 +1,111 @@
+{
+  "family": "carrier-type-b-simulator-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "1024",
+  "memory": "2048",
+  "containerDefinitions": [
+    {
+      "name": "gateway",
+      "image": "carrier-b-gateway:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "hostPort": 80,
+          "protocol": "tcp"
+        }
+      ]
+    },
+    {
+      "name": "carrier-a",
+      "image": "carrier-b-carrier-a:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "PORT",
+          "value": "8000"
+        },
+        {
+          "name": "RATE_LIMIT_PER_MINUTE",
+          "value": "60"
+        }
+      ]
+    },
+    {
+      "name": "carrier-b",
+      "image": "carrier-b-carrier-b:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "PORT",
+          "value": "8000"
+        },
+        {
+          "name": "RATE_LIMIT_PER_MINUTE",
+          "value": "60"
+        }
+      ]
+    },
+    {
+      "name": "carrier-c",
+      "image": "carrier-b-carrier-c:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "PORT",
+          "value": "8000"
+        },
+        {
+          "name": "RATE_LIMIT_PER_MINUTE",
+          "value": "60"
+        }
+      ]
+    },
+    {
+      "name": "carrier-d",
+      "image": "carrier-b-carrier-d:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "PORT",
+          "value": "8000"
+        },
+        {
+          "name": "RATE_LIMIT_PER_MINUTE",
+          "value": "60"
+        }
+      ]
+    }
+  ]
+}

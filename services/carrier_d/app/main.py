@@ -58,6 +58,12 @@ GENERATED_EVENTS_GAUGE = Gauge(
 
 app = FastAPI(title="Carrier D API", version="1.0.0")
 requests_by_ip = defaultdict(list)
+@app.middleware("http")
+async def forwarded_prefix_middleware(request: Request, call_next):
+    prefix = request.headers.get("x-forwarded-prefix")
+    if prefix:
+        request.scope["root_path"] = prefix.rstrip("/")
+    return await call_next(request)
 
 
 def get_db():

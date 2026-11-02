@@ -217,3 +217,84 @@ def seed_mongo_cycle(count, cycle_id):
         "cycle_id": cycle_id, "started_at": now, "finished_at": datetime.now(timezone.utc).isoformat(),
         "events_requested": count, "events_inserted": count, "status": "completed"}}, upsert=True)
     client.close()
+
+
+def cleanup_relational(carrier: str, cutoff_cycle: str, cutoff_iso: str, keep_seed: bool = True) -> dict:
+    """Purge dynamic simulation cycles older than cutoff from relational database."""
+    engine = get_engine(carrier)
+    deleted_events = 0
+    deleted_runs = 0
+    deleted_shipments = 0
+    with engine.begin() as conn:
+        # 1. Delete events belonging to cycles older than cutoff_cycle
+        cond = (events.c.cycle_id.startswith("cycle-")) & (events.c.cycle_id < cutoff_cycle)
+        if not keep_seed:
+            cond = cond | events.c.cycle_id.startswith("seed-")
+        res_evt = conn.execute(events.delete().where(cond))
+        deleted_events = res_evt.rowcount or 0
+
+        # 2. Delete generation runs older than cutoff_iso
+        res_run = conn.execute(runs.delete().where(runs.c.started_at < cutoff_iso))
+        deleted_runs = res_run.rowcount or 0
+
+        # 3. Delete cycle-generated shipments older than cutoff_iso
+        res_ship = conn.execute(
+            shipments.delete().where(
+                shipments.c.raw_data.like("%created_by_cycle%") & (shipments.c.updated_at < cutoff_iso)
+            )
+        )
+        deleted_shipments = res_ship.rowcount or 0
+
+    engine.dispose()
+    return {
+        "carrier": carrier,
+        "deleted_events": deleted_events,
+        "deleted_runs": deleted_runs,
+        "deleted_shipments": deleted_shipments,
+        "cutoff_cycle": cutoff_cycle,
+    }
+
+
+def cleanup_mongo(cutoff_cycle: str, cutoff_iso: str, keep_seed: bool = True) -> dict:
+    """Purge dynamic simulation cycles older than cutoff from MongoDB."""
+    client = MongoClient(CARRIERS["C"]["url"], serverSelectionTimeoutMS=10000)
+    db = client[DB_NAME]
+    query_events = {"cycle_id": {"$regex": "^cycle-", "$lt": cutoff_cycle}}
+    if not keep_seed:
+        query_events = {
+            "$or": [
+                {"cycle_id": {"$regex": "^cycle-", "$lt": cutoff_cycle}},
+                {"cycle_id": {"$regex": "^seed-"}},
+            ]
+        }
+    res_evt = db["events"].delete_many(query_events)
+    res_runs = db["generation_runs"].delete_many({"started_at": {"$lt": cutoff_iso}})
+    res_ships = db["shipments"].delete_many({"created_by_cycle": {"$exists": True, "$lt": cutoff_cycle}})
+    client.close()
+    return {
+        "carrier": "C",
+        "deleted_events": res_evt.deleted_count or 0,
+        "deleted_runs": res_runs.deleted_count or 0,
+        "deleted_shipments": res_ships.deleted_count or 0,
+        "cutoff_cycle": cutoff_cycle,
+    }
+
+
+def cleanup_old_data(carrier: str, retention_days: int = 3, keep_seed: bool = True) -> dict:
+    """Purge simulated events, runs, and temporary cycle shipments older than retention_days.
+
+    Args:
+        carrier: Carrier identifier ('A', 'B', 'C', or 'D').
+        retention_days: Number of days to retain dynamic simulation cycles.
+        keep_seed: Whether to preserve baseline seed data.
+
+    Returns:
+        Dictionary with count of deleted items per category.
+    """
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff_cycle = "cycle-" + cutoff_date.strftime("%Y%m%dT%H%MZ")
+    cutoff_iso = cutoff_date.isoformat()
+
+    if carrier == "C":
+        return cleanup_mongo(cutoff_cycle, cutoff_iso, keep_seed=keep_seed)
+    return cleanup_relational(carrier, cutoff_cycle, cutoff_iso, keep_seed=keep_seed)

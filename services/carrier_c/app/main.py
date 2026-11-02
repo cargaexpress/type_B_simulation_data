@@ -173,3 +173,36 @@ def list_events(
             "returned": len(items),
         },
     }
+
+
+@app.post("/maintenance/cleanup", tags=["Maintenance"])
+def cleanup_events(
+    days: int = Query(default=3, ge=1, description="Retention period in days"),
+    purge_seed: bool = Query(default=False, description="Whether to also remove initial seed baseline"),
+):
+    """Purge simulated events, runs, and dynamic shipments older than retention window from MongoDB."""
+    from datetime import datetime, timedelta, timezone
+
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_cycle = "cycle-" + cutoff_date.strftime("%Y%m%dT%H%MZ")
+    cutoff_iso = cutoff_date.isoformat()
+
+    query_events = {"cycle_id": {"$regex": "^cycle-", "$lt": cutoff_cycle}}
+    if purge_seed:
+        query_events = {
+            "$or": [
+                {"cycle_id": {"$regex": "^cycle-", "$lt": cutoff_cycle}},
+                {"cycle_id": {"$regex": "^seed-"}},
+            ]
+        }
+    res_events = db["events"].delete_many(query_events)
+    res_runs = db["generation_runs"].delete_many({"started_at": {"$lt": cutoff_iso}})
+    res_shipments = db["shipments"].delete_many({"created_by_cycle": {"$exists": True, "$lt": cutoff_cycle}})
+
+    return {
+        "carrier": CARRIER,
+        "deleted_events": res_events.deleted_count or 0,
+        "deleted_runs": res_runs.deleted_count or 0,
+        "deleted_shipments": res_shipments.deleted_count or 0,
+        "cutoff_cycle": cutoff_cycle,
+    }

@@ -230,3 +230,38 @@ def list_events(
             "returned": len(items),
         },
     }
+
+
+@app.post("/maintenance/cleanup", tags=["Maintenance"])
+def cleanup_events(
+    days: int = Query(default=3, ge=1, description="Retention period in days"),
+    purge_seed: bool = Query(default=False, description="Whether to also remove initial seed baseline"),
+    db: Session = Depends(get_db),
+):
+    """Purge simulated events, runs, and dynamic shipments older than retention window."""
+    from datetime import datetime, timedelta, timezone
+
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_cycle = "cycle-" + cutoff_date.strftime("%Y%m%dT%H%MZ")
+    cutoff_iso = cutoff_date.isoformat()
+
+    cond = ShipmentEvent.cycle_id.startswith("cycle-") & (ShipmentEvent.cycle_id < cutoff_cycle)
+    if purge_seed:
+        cond = cond | ShipmentEvent.cycle_id.startswith("seed-")
+
+    del_events = db.query(ShipmentEvent).filter(cond).delete(synchronize_session=False)
+    del_runs = db.query(GenerationRun).filter(GenerationRun.started_at < cutoff_iso).delete(synchronize_session=False)
+    del_shipments = (
+        db.query(Shipment)
+        .filter(Shipment.raw_data.like("%created_by_cycle%") & (Shipment.updated_at < cutoff_iso))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+
+    return {
+        "carrier": CARRIER,
+        "deleted_events": del_events,
+        "deleted_runs": del_runs,
+        "deleted_shipments": del_shipments,
+        "cutoff_cycle": cutoff_cycle,
+    }

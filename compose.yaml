@@ -164,6 +164,25 @@ services:
       seed: {condition: service_completed_successfully}
     restart: unless-stopped
 
+  gateway:
+    image: nginx:alpine
+    container_name: simulator_gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./gateway/html:/usr/share/nginx/html:ro
+    networks:
+      - carrier_a_net
+      - carrier_b_net
+      - carrier_c_net
+      - carrier_d_net
+    depends_on:
+      carrier_a: {condition: service_healthy}
+      carrier_b: {condition: service_healthy}
+      carrier_c: {condition: service_healthy}
+      carrier_d: {condition: service_healthy}
+    restart: unless-stopped
 volumes:
   carrier_a_pg_data:
   carrier_b_mysql_data:

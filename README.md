@@ -20,12 +20,13 @@ Each carrier has its own API service, database technology, data format, and trac
 
 ## Architecture
 
-| Service | Database | Local API port |
-|---|---|---:|
-| Carrier A | PostgreSQL | 8001 |
-| Carrier B | MySQL | 8002 |
-| Carrier C | MongoDB | 8003 |
-| Carrier D | SQLite | 8004 |
+| Service | Database | Local API port | Public HTTPS Gateway Endpoint |
+|---|---|---:|---|
+| **Carrier A** | PostgreSQL 16 | 8001 | [https://cargaexpress-simulator-b.mooo.com/carrier-a/](https://cargaexpress-simulator-b.mooo.com/carrier-a/docs) |
+| **Carrier B** | MySQL 8.4 | 8002 | [https://cargaexpress-simulator-b.mooo.com/carrier-b/](https://cargaexpress-simulator-b.mooo.com/carrier-b/docs) |
+| **Carrier C** | MongoDB 7.0 | 8003 | [https://cargaexpress-simulator-b.mooo.com/carrier-c/](https://cargaexpress-simulator-b.mooo.com/carrier-c/docs) |
+| **Carrier D** | SQLite 3 | 8004 | [https://cargaexpress-simulator-b.mooo.com/carrier-d/](https://cargaexpress-simulator-b.mooo.com/carrier-d/docs) |
+| **Gateway** | Nginx (Alpine) | 80, 443 | [https://cargaexpress-simulator-b.mooo.com/](https://cargaexpress-simulator-b.mooo.com/) |
 
 The project also includes:
 
